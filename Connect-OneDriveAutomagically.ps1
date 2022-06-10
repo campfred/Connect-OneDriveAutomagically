@@ -76,15 +76,23 @@ function Install-OneDrive
 		{
 			winget install --exact --silent $script:OneDrivePackageName --accept-source-agreements
 		}
+		Write-Debug "Fin de l'installation de OneDrive."
 	}
-	Write-Debug "Fin de l'installation de OneDrive."
+	else {
+		Write-Debug "OneDrive est déjà installé."
+	}
 }
 
 function Connect-OneDrive ([string] $EmailAddress)
 {
 	Write-Debug "Vérification que OneDrive est configuré pour le compte professionnel..."
+	$IsNullOrEmpty = [string]::IsNullOrEmpty($env:OneDriveCommercial)
+	Write-Debug "Est nul ou vide : $IsNullOrEmpty"
+	$HasSyncAttribute = Test-FolderSync -Path $env:OneDriveCommercial
+	Write-Debug "A l'attribut de synchronisation : $HasSyncAttribute / N'a pas l'attribut de synchronisation : $(!$HasSyncAttribute)"
+	Write-Debug "Synchronisation forcée : $script:ForceSync"
 	# if (([string]::IsNullOrEmpty($env:OneDriveCommercial) -and ((Get-ChildItem -Directory | Where-Object { $_.PSIsContainer -and $_.Name.StartsWith("OneDrive - ") }).Count -le 0)) -or $script:ForceSync)
-	if ([string]::IsNullOrEmpty($env:OneDriveCommercial) -or $script:ForceSync)
+	if ($IsNullOrEmpty -or !($HasSyncAttribute) -or $script:ForceSync)
 	{
 		Write-Host "Configuration de OneDrive en cours avec l'adresse « $local:EmailAddress »..."
 		Start-Process "odopen://sync?userEmail=$local:EmailAddress" # Lancement demandant le démarrage de la synchronisation avec une adresse courriel spécifique
@@ -99,6 +107,17 @@ function Connect-OneDrive ([string] $EmailAddress)
 		Start-Sleep 30
 		Write-Debug "Fin de la configuration de OneDrive."
 	}
+	else
+	{
+		Write-Debug "Le répertoire personnel OneDrive est configuré."
+	}
+}
+
+function Test-FolderSync ([System.IO.FileInfo] $Path)
+{
+	# File attribute fields : https://docs.microsoft.com/en-us/dotnet/api/system.io.fileattributes?view=net-6.0#fields
+	# Bitwise operators : https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arithmetic_operators?view=powershell-7.2#bitwise-operators
+	return ((Get-ItemProperty $Path).Attributes.value__ -band [System.IO.FileAttributes]::ReparsePoint.value__) -eq 1024
 }
 
 function Sync-Libraries ([string] $Email, [System.IO.FileInfo] $Path, [switch] $Force)

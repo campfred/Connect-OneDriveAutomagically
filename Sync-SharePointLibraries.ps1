@@ -20,6 +20,14 @@ param (
 	[int] $DelayBetweenSyncs = 5
 )
 
+function Test-FolderSync ([System.IO.FileInfo] $Path)
+{
+	# File attribute fields : https://docs.microsoft.com/en-us/dotnet/api/system.io.fileattributes?view=net-6.0#fields
+	# Bitwise operators : https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arithmetic_operators?view=powershell-7.2#bitwise-operators
+	return ((Get-ItemProperty $Path).Attributes.value__ -band [System.IO.FileAttributes]::ReparsePoint.value__) -eq 1024
+}
+
+
 [string] $tenantName
 if (-Not [string]::IsNullOrEmpty($env:OneDriveCommercial))
 {
@@ -37,23 +45,34 @@ Write-Debug "$($script:sharePointLibraries.Count) bibliothèques à synchroniser
 for ($indexLibrary = 0; $indexLibrary -lt $script:sharePointLibraries.Count; $indexLibrary++)
 {
 	$sharePointLibrary = $sharePointLibraries[$indexLibrary]
-	Write-Debug "$($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName)"
+	Write-Debug "Vérification que « $($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName) » est configuré..."
 	Write-Progress -Id 1 -Activity "Synchronisation des bibliothèques SharePoint pour $script:UserEmail" -Status "Vérification de la présence de « $($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName) »" -PercentComplete (($indexLibrary + 1) / $script:sharePointLibraries.Count * 100)
-	
-	if (!(Test-Path -Path "$script:tenantDirectory\$($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName)"))
+	$Exists = Test-Path -Path "$script:tenantDirectory\$($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName)"
+	Write-Debug "Existe : $Exists / Est inexistant : $(!$Exists)"
+	$HasSyncAttribute = Test-FolderSync -Path "$script:tenantDirectory\$($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName)"
+	Write-Debug "A l'attribut de synchronisation : $HasSyncAttribute / N'a pas l'attribut de synchronisation : $(!$HasSyncAttribute)"
+	Write-Debug "Synchronisation forcée : $script:Force"
+
+	if (!($Exists) -or (!$HasSyncAttribute) -or $script:Force)
 	{
-		Write-Debug "Bibliothèque absente.`nSynchronisation de la bibliothèque..."
+		Write-Debug "Bibliothèque absente. Synchronisation de la bibliothèque..."
 		Write-Progress -Id 1 -Activity "Synchronisation des bibliothèques SharePoint pour $script:UserEmail" -Status "Démarrage de la synchronisation « $($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName) »" -PercentComplete (($indexLibrary + 1) / $script:sharePointLibraries.Count * 100)
-		
+		Write-Host "Synchronisation de « $($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName) »..."
+
 		$synchronizationURI = "odopen://sync/?userEmail=$script:UserEmail&webTitle=$($local:sharePointLibrary.SiteName)&listTitle=$($local:sharePointLibrary.LibraryName)&$($local:sharePointLibrary.SynchronizationString)"
-		Write-Debug $local:synchronizationURI
+		Write-Debug "URI de synchronisation forgée : $local:synchronizationURI"
 		Start-Process "odopen://sync/?userEmail=$script:UserEmail&webTitle=$($local:sharePointLibrary.SiteName)&listTitle=$($local:sharePointLibrary.LibraryName)&$($local:sharePointLibrary.SynchronizationString)"
+			
 		# Attente pour laisser OneDrive digérer ça avant d'y pitcher le prochain.
-		Start-Sleep -Seconds $script:DelayBetweenSyncs
+		do
+		{
+			Start-Sleep -Seconds $script:DelayBetweenSyncs
+			Write-Host -NoNewline "."
+		} while (-not (Test-FolderSync -Path "$script:tenantDirectory\$($local:sharePointLibrary.SiteName) - $($local:sharePointLibrary.LibraryName)"))
 	}
 	else
 	{
-		Write-Debug "Bibliothèque existante.`nOn passe."
+		Write-Debug "Bibliothèque existante. On passe..."
 	}
 }
 Write-Progress -Id 1 -Activity "Synchronisation des bibliothèques SharePoint pour $script:UserEmail" -PercentComplete (100)
